@@ -1,0 +1,19 @@
+{
+  "venvPath": "backend",
+  "venv": "venv",
+  "pythonPath": "backend/venv/Scripts/python.exe",
+  "extraPaths": [
+    "backend",
+    "backend/app"
+  ],
+  "include": [
+    "backend"
+  ],
+  "exclude": [
+    "backend/venv",
+    "backend/__pycache__",
+    "frontend/node_modules"
+  ],
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "none"
+}
