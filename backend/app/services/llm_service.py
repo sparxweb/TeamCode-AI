@@ -165,16 +165,33 @@ class LLMService:
             self._client = None
 
     def is_available(self) -> tuple[bool, str]:
+        """
+        Fast configuration check used on every review request.
+        Does NOT make a live network call — just checks that the key and client are set up.
+        Use is_available_live() only for the health endpoint.
+        """
         if not settings.is_groq_configured:
             return False, "GROQ_API_KEY is not configured in .env."
         if not self._client:
             return False, "Groq client is not initialized."
+        return True, f"Groq LLM service configured ({settings.GROQ_MODEL})."
+
+    def is_available_live(self) -> tuple[bool, str]:
+        """
+        Live connectivity check — makes a real API call to Groq.
+        Only called by the /api/health endpoint, NOT during reviews.
+        """
+        ok, msg = self.is_available()
+        if not ok:
+            return ok, msg
         try:
+            assert self._client is not None
             self._client.models.list()
             return True, f"Groq LLM service is ready ({settings.GROQ_MODEL})."
         except Exception as e:
             logger.warning("Groq live connectivity check failed: %s", str(e))
             return False, f"Groq authentication or connectivity failed: {str(e)}"
+
 
     def execute_review(
         self,
@@ -188,8 +205,9 @@ class LLMService:
         Sends code and categorized team context to Groq and parses structured review findings.
         """
         available, reason = self.is_available()
-        if not available:
+        if not available or not self._client:
             raise ValueError(f"Groq service unavailable: {reason}")
+        client = self._client
 
         # Build prompt sections
         memory_section = format_memories_as_team_context(memories)
@@ -221,7 +239,7 @@ Perform a rigorous, structured code review. Adhere strictly to the requested JSO
         for model_name in models_to_try:
             try:
                 logger.info("Calling Groq LLM with model: %s", model_name)
-                completion = self._client.chat.completions.create(
+                completion = client.chat.completions.create(
                     model=model_name,
                     messages=[
                         {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
@@ -267,8 +285,9 @@ Perform a rigorous, structured code review. Adhere strictly to the requested JSO
         Invokes Groq to generate a corrected version of the code that resolves the findings.
         """
         available, reason = self.is_available()
-        if not available:
+        if not available or not self._client:
             raise ValueError(f"Groq service unavailable for auto-fix: {reason}")
+        client = self._client
 
         findings_text = ""
         for i, f in enumerate(findings, 1):
@@ -298,7 +317,7 @@ Generate the complete fixed code resolving every issue above. Adhere strictly to
         for model_name in models_to_try:
             try:
                 logger.info("Calling Auto-Fix Agent with model: %s", model_name)
-                completion = self._client.chat.completions.create(
+                completion = client.chat.completions.create(
                     model=model_name,
                     messages=[
                         {"role": "system", "content": AUTO_FIX_SYSTEM_PROMPT},

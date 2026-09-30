@@ -2492,8 +2492,9 @@ body {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.8rem;
   color: #0f172a;
-  white-space: pre-wrap;
-  word-break: break-all;
+  white-space: pre;
+  word-break: normal;
+  overflow-x: auto;
 }
 
 .finding-why-section {
@@ -2692,8 +2693,8 @@ body {
   font-size: 0.84rem;
   color: #e2e8f0;
   line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-all;
+  white-space: pre;
+  word-break: normal;
   overflow-x: auto;
 }
 
@@ -2896,11 +2897,12 @@ body {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.8rem;
   color: #1e293b;
-  white-space: pre-wrap;
-  word-break: break-all;
+  white-space: pre;
+  word-break: normal;
   background: #f8fafc;
   max-height: 380px;
   overflow-y: auto;
+  overflow-x: auto;
 }
 
 .changes-description-card {

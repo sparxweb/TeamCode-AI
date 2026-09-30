@@ -160,3 +160,44 @@ def test_syntax_error_in_submitted_code_does_not_crash_scanner():
     broken_code = "def foo(::\n   broken syntax !!! %%%"
     findings = deterministic_scanner.scan(broken_code, "python")
     assert isinstance(findings, list)
+
+
+def test_review_agent_handles_string_findings_gracefully(monkeypatch):
+    """Review agent must handle LLM returning strings instead of dicts in findings without crashing."""
+    from app.services.llm_service import llm_service
+
+    code = "def add(a, b):\n    return a + b\n"
+    # Simulate LLM returning finding strings instead of dictionaries or a raw string for findings
+    raw_llm_response = {
+        "status": "FINDINGS",
+        "summary": "Review completed with plain text finding strings",
+        "overall_severity": "low",
+        "confidence": 0.85,
+        "findings": [
+            "Variable naming could be more descriptive",
+            "Missing type annotations and docstrings",
+        ],
+        "explanation": "Suggestions provided as string items."
+    }
+
+    monkeypatch.setattr(llm_service, "execute_review", lambda *args, **kwargs: raw_llm_response)
+    monkeypatch.setattr(
+        llm_service,
+        "execute_auto_fix",
+        lambda *args, **kwargs: {
+            "fixed_code": code,
+            "changes_made": ["No change"],
+            "remaining_risks": [],
+        },
+    )
+
+    req = CodeReviewRequest(code=code, language="python")
+    res = review_agent.review_code(req)
+
+    assert res.status == "FINDINGS"
+    assert len(res.findings) == 2
+    for finding in res.findings:
+        assert isinstance(finding.title, str)
+        assert isinstance(finding.explanation, str)
+        assert finding.severity in ("info", "low", "medium", "high", "critical")
+

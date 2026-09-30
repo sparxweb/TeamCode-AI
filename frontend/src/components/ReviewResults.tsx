@@ -32,6 +32,7 @@ interface ReviewResultsProps {
   onTeachRuleFromReview?: (rule: string, context: string, tags: string[]) => void;
   onRunReviewAgain?: () => void;
   onApplyFixedCode?: (code: string) => void;
+  onReviewFixedCode?: (fixedCode: string) => void;
 }
 
 export const ReviewResults: React.FC<ReviewResultsProps> = ({
@@ -41,6 +42,7 @@ export const ReviewResults: React.FC<ReviewResultsProps> = ({
   onTeachRuleFromReview,
   onRunReviewAgain,
   onApplyFixedCode,
+  onReviewFixedCode,
 }) => {
   const [copiedSummary, setCopiedSummary] = useState(false);
   const [copiedFixedCode, setCopiedFixedCode] = useState(false);
@@ -132,6 +134,42 @@ export const ReviewResults: React.FC<ReviewResultsProps> = ({
     }
   };
 
+  const getStatusBadge = (status?: string) => {
+    switch (status) {
+      case 'RESOLVED':
+        return (
+          <span className="pill-badge pill-resolved" style={{ backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.3)' }}>
+            ✓ RESOLVED
+          </span>
+        );
+      case 'NEW_ISSUE':
+        return (
+          <span className="pill-badge pill-new" style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+            NEW ISSUE
+          </span>
+        );
+      case 'FALSE_POSITIVE':
+        return (
+          <span className="pill-badge pill-fp" style={{ backgroundColor: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+            FALSE POSITIVE
+          </span>
+        );
+      case 'UNABLE_TO_VERIFY':
+        return (
+          <span className="pill-badge pill-unverified" style={{ backgroundColor: 'rgba(148, 163, 184, 0.15)', color: '#94a3b8', border: '1px solid rgba(148, 163, 184, 0.3)' }}>
+            UNABLE TO VERIFY
+          </span>
+        );
+      case 'STILL_PRESENT':
+      default:
+        return (
+          <span className="pill-badge pill-still-present" style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+            STILL PRESENT
+          </span>
+        );
+    }
+  };
+
   const getCategoryIcon = (category: string) => {
     switch (category) {
       case 'security':
@@ -177,9 +215,14 @@ export const ReviewResults: React.FC<ReviewResultsProps> = ({
 
   // Determine review state and findings
   const findingsList: FindingItem[] = review.findings || [];
-  const isAIPartialFailure = review.review_state === 'AI_PARTIAL_FAILURE';
+  const isAIPartialFailure =
+    review.review_state === 'AI_PARTIAL_FAILURE' ||
+    review.review_state === 'DETERMINISTIC_FALLBACK' ||
+    Boolean(review.fallback_used);
+  const isReviewFailed = review.review_state === 'REVIEW_FAILED';
   const hasFindings = findingsList.length > 0;
-  const isPassed = !isAIPartialFailure && !hasFindings && review.status === 'PASS';
+  const isPassed = !isReviewFailed && !isAIPartialFailure && !hasFindings && review.status === 'PASS';
+  const hasFixedCode = Boolean(review.auto_fix?.fixed_code && review.auto_fix.fixed_code.trim());
 
   // Count issues by category
   const securityCount = findingsList.filter((f) => f.category === 'security').length;
@@ -198,9 +241,45 @@ export const ReviewResults: React.FC<ReviewResultsProps> = ({
     <div className="card review-panel review-results-panel">
       {/* Panel Top Header */}
       <div className="panel-header">
-        <div className="panel-header-title-group">
+        <div className="panel-header-title-group" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
           <Sparkles size={16} className="panel-header-icon" aria-hidden="true" />
           <h2 className="panel-title">Review</h2>
+
+          {/* Mode Pill Badge */}
+          {isReviewFailed ? (
+            <span className="pill-badge" style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)', fontWeight: 600 }}>
+              REVIEW FAILED
+            </span>
+          ) : isAIPartialFailure ? (
+            <span className="pill-badge" style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.3)', fontWeight: 600 }}>
+              DETERMINISTIC FALLBACK
+            </span>
+          ) : (
+            <span className="pill-badge" style={{ backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)', fontWeight: 600 }}>
+              AI REVIEW
+            </span>
+          )}
+
+          {/* Auto-fix Status Pill Badge */}
+          {hasFixedCode ? (
+            review.auto_fix?.validation_status === 'VERIFIED' ? (
+              <span className="pill-badge" style={{ backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.3)', fontWeight: 600 }}>
+                VERIFIED FIX AVAILABLE
+              </span>
+            ) : review.auto_fix?.validation_status === 'VALIDATION_LIMITED' ? (
+              <span className="pill-badge" style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.3)', fontWeight: 600 }}>
+                FIX GENERATED
+              </span>
+            ) : (
+              <span className="pill-badge" style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)', fontWeight: 600 }}>
+                VALIDATION FAILED
+              </span>
+            )
+          ) : hasFindings ? (
+            <span className="pill-badge" style={{ backgroundColor: 'rgba(148, 163, 184, 0.15)', color: '#94a3b8', border: '1px solid rgba(148, 163, 184, 0.3)', fontWeight: 600 }}>
+              AUTO-FIX UNAVAILABLE
+            </span>
+          ) : null}
         </div>
 
         <div className="panel-header-actions">
@@ -227,24 +306,91 @@ export const ReviewResults: React.FC<ReviewResultsProps> = ({
 
       <div className="results-scroll-body">
         {/* ============================================================== */}
+        {/* CASE 0: REVIEW FAILED                                         */}
+        {/* ============================================================== */}
+        {isReviewFailed && (
+          <section className="review-failed-section" aria-labelledby="failed-heading" style={{ marginBottom: '1.5rem' }}>
+            <div className="failed-banner" style={{ borderLeft: '4px solid #ef4444', background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(220, 38, 38, 0.04))', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.25)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                <XCircle size={28} className="text-danger" />
+                <h3 id="failed-heading" style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ef4444', margin: 0 }}>
+                  Review could not be completed.
+                </h3>
+              </div>
+              <p style={{ color: '#cbd5e1', fontSize: '0.9rem', margin: '0.5rem 0' }}>
+                {review.summary || "Review analysis could not be completed on this snippet."}
+              </p>
+              {review.system_reason && (
+                <div style={{ marginTop: '0.75rem', padding: '0.6rem 0.85rem', background: 'rgba(0,0,0,0.4)', borderRadius: '6px', fontSize: '0.82rem', color: '#f87171', fontFamily: 'monospace' }}>
+                  <strong>Technical Reason:</strong> {review.system_reason}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* ============================================================== */}
         {/* CASE 1: PASS — NO ISSUES DETECTED                            */}
         {/* ============================================================== */}
         {isPassed && (
           <section className="review-pass-section" aria-labelledby="pass-heading">
-            <div className="pass-banner">
-              <div className="pass-icon-circle">
-                <CheckCircle2 size={32} className="text-success" />
+            {review.is_fixed_code_review ? (
+              <div className="pass-banner" style={{ borderLeft: '4px solid #22c55e', background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.12), rgba(16, 185, 129, 0.04))' }}>
+                <div className="pass-icon-circle" style={{ background: 'rgba(34, 197, 94, 0.2)' }}>
+                  <CheckCircle2 size={32} className="text-success" />
+                </div>
+                <h3 id="pass-heading" className="pass-title" style={{ color: '#22c55e' }}>
+                  ✓ Fixed Code Re-Review: VERIFIED
+                </h3>
+                <p className="pass-subtitle">
+                  Deterministic syntax validation, static security analysis, and regression checks completed.
+                </p>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem', marginTop: '1.25rem', padding: '1rem', background: 'rgba(0,0,0,0.3)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Original Issue</div>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#22c55e', marginTop: '0.2rem' }}>RESOLVED</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>New Issues Introduced</div>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#38bdf8', marginTop: '0.2rem' }}>0</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Validation</div>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#22c55e', marginTop: '0.2rem' }}>PASSED</div>
+                  </div>
+                </div>
+
+                {review.resolved_findings && review.resolved_findings.length > 0 && (
+                  <div style={{ marginTop: '1rem', textAlign: 'left', padding: '0.75rem', background: 'rgba(34, 197, 94, 0.08)', borderRadius: '6px', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#22c55e', marginBottom: '0.4rem' }}>
+                      Resolved Vulnerabilities ({review.resolved_findings.length}):
+                    </div>
+                    {review.resolved_findings.map((rf, rIdx) => (
+                      <div key={rIdx} style={{ fontSize: '0.8rem', color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.2rem' }}>
+                        <span style={{ color: '#22c55e' }}>✓</span>
+                        <strong>{rf.rule_id}</strong>: {rf.title} (Line {rf.line_start}) — <span style={{ color: '#94a3b8' }}>{rf.resolution_note || 'Resolved'}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <h3 id="pass-heading" className="pass-title">
-                ✓ Code Review Passed
-              </h3>
-              <p className="pass-subtitle">
-                No issues detected.
-              </p>
-              <div className="pass-instruction">
-                No security, quality, or architecture issues were identified. Code looks good — no fix required.
+            ) : (
+              <div className="pass-banner">
+                <div className="pass-icon-circle">
+                  <CheckCircle2 size={32} className="text-success" />
+                </div>
+                <h3 id="pass-heading" className="pass-title">
+                  ✓ Code Review Passed
+                </h3>
+                <p className="pass-subtitle">
+                  No issues detected.
+                </p>
+                <div className="pass-instruction">
+                  No security, quality, or architecture issues were identified. Code looks good — no fix required.
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="pass-summary-box">
               <div className="pass-summary-meta">
@@ -260,20 +406,20 @@ export const ReviewResults: React.FC<ReviewResultsProps> = ({
         {/* ============================================================== */}
         {/* CASE 2: AI PARTIAL FAILURE WITH NO DETERMINISTIC FINDINGS     */}
         {/* ============================================================== */}
-        {isAIPartialFailure && !hasFindings && (
+        {isAIPartialFailure && !hasFindings && !isReviewFailed && (
           <section className="review-partial-failure-section" aria-labelledby="partial-heading">
             <div className="partial-failure-banner">
               <div className="partial-failure-icon-circle">
-                <AlertTriangle size={32} className="text-warning" />
+                <ShieldCheck size={32} className="text-primary" />
               </div>
               <h3 id="partial-heading" className="partial-failure-title">
-                AI Review Unavailable
+                Deterministic Checks Passed
               </h3>
               <p className="partial-failure-subtitle">
-                Deterministic analysis completed.
+                AI review unavailable — deterministic security analysis used.
               </p>
               <div className="partial-failure-instruction">
-                {review.summary || "Deterministic checks found no obvious static pattern violations, but AI review could not be completed."}
+                {review.summary || "Deterministic checks found no obvious static pattern violations. (External AI layer was unavailable)"}
               </div>
             </div>
           </section>
@@ -285,11 +431,11 @@ export const ReviewResults: React.FC<ReviewResultsProps> = ({
         {hasFindings && (
           <>
             {isAIPartialFailure && (
-              <div className="system-notice-strip" style={{ marginBottom: '1rem', borderRadius: '8px' }}>
+              <div className="system-notice-strip" style={{ marginBottom: '1rem', borderRadius: '8px', borderLeft: '4px solid #f59e0b' }}>
                 <div className="notice-inner">
                   <ShieldCheck size={14} className="text-primary" />
                   <span className="notice-text">
-                    <strong>Review Completed:</strong> Deterministic security analysis completed successfully and flagged {findingsList.length} issue(s) below. (AI review layer was unavailable)
+                    <strong>AI review unavailable — deterministic security analysis used.</strong> Deterministic security scanner flagged {findingsList.length} issue(s) below.
                   </span>
                 </div>
               </div>
@@ -337,6 +483,7 @@ export const ReviewResults: React.FC<ReviewResultsProps> = ({
                       </div>
                       <div className="finding-badges-row">
                         {getSeverityBadge(item.severity)}
+                        {getStatusBadge(item.status)}
                         {typeof item.confidence === 'number' && (
                           <span className="confidence-pill" style={{ fontSize: '0.75rem', padding: '0.15rem 0.5rem', borderRadius: '4px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
                             Confidence {Math.round(item.confidence <= 1 ? item.confidence * 100 : item.confidence)}%
@@ -350,6 +497,22 @@ export const ReviewResults: React.FC<ReviewResultsProps> = ({
                         )}
                       </div>
                     </div>
+
+                    {/* Portability Note if present */}
+                    {item.portability_note && (
+                      <div className="portability-notice" style={{ margin: '0.4rem 0', padding: '0.4rem 0.75rem', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.25)', fontSize: '0.82rem', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <AlertTriangle size={14} />
+                        <span><strong>Portability Note:</strong> {item.portability_note}</span>
+                      </div>
+                    )}
+
+                    {/* Resolution Note if resolved */}
+                    {item.resolution_note && (
+                      <div className="resolution-notice" style={{ margin: '0.4rem 0', padding: '0.35rem 0.75rem', borderRadius: '4px', background: 'rgba(34, 197, 94, 0.08)', border: '1px solid rgba(34, 197, 94, 0.25)', fontSize: '0.82rem', color: '#22c55e', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Check size={14} />
+                        <span><strong>Resolution Note:</strong> {item.resolution_note}</span>
+                      </div>
+                    )}
 
                     {/* Evidence Snippet if detected */}
                     {item.evidence && (
@@ -510,6 +673,31 @@ export const ReviewResults: React.FC<ReviewResultsProps> = ({
                       </button>
                     )}
 
+                    {onReviewFixedCode && (
+                      <button
+                        type="button"
+                        className="btn-review-fix-primary"
+                        onClick={() => onReviewFixedCode(review.auto_fix!.fixed_code!)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          padding: '0.35rem 0.75rem',
+                          borderRadius: '6px',
+                          background: 'rgba(59, 130, 246, 0.15)',
+                          color: '#60a5fa',
+                          border: '1px solid rgba(59, 130, 246, 0.35)',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                        }}
+                        title="Run complete review and verification pipeline against the fixed code"
+                      >
+                        <RotateCw size={13} />
+                        <span>[Review Fixed Code]</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       className="btn-view-changes-ghost"
@@ -611,7 +799,20 @@ export const ReviewResults: React.FC<ReviewResultsProps> = ({
                           : 'Validation failed (syntax, missing import, or rule violation)'}
                       </span>
                     </div>
+                    {review.auto_fix.verification_checks && review.auto_fix.verification_checks.map((chk, cIdx) => (
+                      <div key={cIdx} className="checklist-item valid">
+                        <Check size={14} className="text-success" />
+                        <span>{chk}</span>
+                      </div>
+                    ))}
                   </div>
+
+                  {review.auto_fix.portability_notes && review.auto_fix.portability_notes.map((pn, pIdx) => (
+                    <div key={pIdx} className="portability-notice" style={{ marginTop: '0.5rem', padding: '0.5rem 0.75rem', borderRadius: '6px', background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.25)', fontSize: '0.82rem', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <AlertTriangle size={14} />
+                      <span><strong>Portability Note:</strong> {pn}</span>
+                    </div>
+                  ))}
 
                   {review.auto_fix.validation_message && (
                     <div className="validation-note">

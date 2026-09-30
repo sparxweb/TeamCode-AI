@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api/health", tags=["Health"])
 
 @router.get("", response_model=ServiceHealthResponse)
 def get_health():
-    groq_ok, groq_msg = llm_service.is_available()
+    groq_ok, groq_msg = llm_service.is_available_live()
     hindsight_ok, hindsight_msg = hindsight_service.is_available()
 
     status = "healthy" if (groq_ok and hindsight_ok) else "degraded"

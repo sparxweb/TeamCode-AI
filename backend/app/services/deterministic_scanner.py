@@ -1,7 +1,14 @@
 import ast
+import hashlib
 import re
 from typing import List, Optional, Set
 from app.models import FindingItem
+
+
+def generate_finding_id(rule_id: str, line_start: int, category: str, evidence: Optional[str] = None) -> str:
+    clean_ev = re.sub(r"\s+", " ", (evidence or "")[:60].strip())
+    h = hashlib.sha256(f"{rule_id}:{category}:{line_start}:{clean_ev}".encode("utf-8")).hexdigest()[:8]
+    return f"{rule_id}_{h}"
 
 
 SQL_KEYWORDS_PATTERN = re.compile(
@@ -21,7 +28,23 @@ SECRET_KEY_PATTERN = re.compile(
 AWS_KEY_PATTERN = re.compile(r"""['"](AKIA[0-9A-Z]{16})['"]""")
 
 DANGEROUS_SHELL_PATTERN = re.compile(
-    r"""(?i)(os\.system|os\.popen|subprocess\.(?:Popen|run|call|check_output))\s*\(\s*(f['"].*?\{|.*?\+|.*?\%\s*|.*?\.format\().*?(shell\s*=\s*True)?"""
+    r"""(?i)(?:os\.(?:system|popen)\s*\(|subprocess\.(?:Popen|run|call|check_output|check_call)\s*\([^)]*shell\s*=\s*True|(?:\$|->|\b)(?:shell_exec|passthru|exec|system)\s*\([^)]*\$|Runtime\.getRuntime\(\)\.exec\s*\([^)]*\+|exec\.Command\s*\(\s*["'](?:sh|bash|cmd)["'],\s*["']-c["'])"""
+)
+
+C_BUFFER_OVERFLOW_PATTERN = re.compile(
+    r"""\b(gets\s*\(|strcpy\s*\(|strcat\s*\(|sprintf\s*\([^,]+,\s*[^"']*\))"""
+)
+
+JAVA_SQL_INJECTION_PATTERN = re.compile(
+    r"""(?i)(?:Statement\.executeQuery|createQuery|createNativeQuery)\s*\([^)]*\+"""
+)
+
+PHP_SQL_INJECTION_PATTERN = re.compile(
+    r"""(?i)(?:mysqli_query|mysql_query|\$pdo->query|\$db->query|\$conn->query)\s*\([^)]*\$"""
+)
+
+GO_SQL_INJECTION_PATTERN = re.compile(
+    r"""(?i)db\.Query(?:Row)?\s*\(\s*fmt\.Sprintf"""
 )
 
 EVAL_EXEC_PATTERN = re.compile(
@@ -432,6 +455,35 @@ class DeterministicSecurityScanner:
                             )
                         )
 
+                # 4b. Dangerous subprocess calls with shell=True in AST
+                if func_name in ("run", "Popen", "call", "check_output", "check_call") and isinstance(node.func, ast.Attribute):
+                    if isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess":
+                        shell_val = False
+                        for kw in node.keywords:
+                            if kw.arg == "shell":
+                                if isinstance(kw.value, ast.Constant) and bool(kw.value.value):
+                                    shell_val = True
+                                elif isinstance(kw.value, ast.Name) and kw.value.id in ("True", "1"):
+                                    shell_val = True
+                        if shell_val:
+                            findings.append(
+                                FindingItem(
+                                    rule_id="CMD001",
+                                    title="Command Injection (subprocess with shell=True)",
+                                    category="security",
+                                    severity="critical",
+                                    confidence=0.98,
+                                    line_start=line_num,
+                                    line_end=getattr(node, "end_lineno", line_num),
+                                    explanation="Invoking subprocess with shell=True executes input through system shell, enabling arbitrary command injection.",
+                                    team_memory_used=[],
+                                    recommended_fix="Remove shell=True and pass command arguments as a list: subprocess.run(['cmd', arg], shell=False)",
+                                    requires_fix=True,
+                                    evidence=line_content,
+                                    validated_by_scanner=True,
+                                )
+                            )
+
                 # 5. Logic: Self-Comparison
             def visit_Compare(self, node: ast.Compare):
                 line_num = getattr(node, "lineno", 1)
@@ -581,6 +633,7 @@ class DeterministicSecurityScanner:
     def _scan_syntax_patterns(self, lines: List[str], language: str) -> List[FindingItem]:
         findings: List[FindingItem] = []
         full_code = "\n".join(lines).lower()
+        lang_lower = (language or "python").lower()
 
         for idx, line in enumerate(lines, 1):
             line_str = line.strip()
@@ -774,20 +827,119 @@ class DeterministicSecurityScanner:
                     )
                 )
 
-            # 6. PATH001: Unsafe Path Construction / Path Traversal
-            if PATH_TRAVERSAL_PATTERN.search(line_str):
+            # 5b. MEM001: Unsafe C/C++ Buffer Manipulation (gets, strcpy, strcat, sprintf)
+            if lang_lower in ("c", "cpp", "c++", "h", "hpp") and C_BUFFER_OVERFLOW_PATTERN.search(line_str):
                 findings.append(
                     FindingItem(
-                        rule_id="PATH001",
-                        title="Path Traversal Risk (Dynamic File Path Construction)",
+                        rule_id="MEM001",
+                        title="Buffer Overflow Risk (Unbounded C String Function)",
                         category="security",
-                        severity="high",
-                        confidence=0.90,
+                        severity="critical",
+                        confidence=0.98,
                         line_start=idx,
                         line_end=idx,
-                        explanation="File path constructed directly from dynamic variables passed to open(). Can allow path traversal if inputs are unvalidated.",
+                        explanation="Unbounded memory function does not perform destination buffer bounds checks, leading to buffer overflow vulnerabilities.",
                         team_memory_used=[],
-                        recommended_fix="Sanitize filename with os.path.basename() or validate target path with pathlib.Path.resolve() within allowed directory.",
+                        recommended_fix="Use bounds-checked functions such as fgets, strncpy, snprintf, or std::string.",
+                        requires_fix=True,
+                        evidence=line_str,
+                        validated_by_scanner=True,
+                    )
+                )
+
+            # 5c. SQL001 in Java, PHP, Go
+            if lang_lower in ("java", "kotlin") and JAVA_SQL_INJECTION_PATTERN.search(line_str):
+                findings.append(
+                    FindingItem(
+                        rule_id="SQL001",
+                        title="SQL Injection (Dynamic Query Concatenation in Java)",
+                        category="security",
+                        severity="critical",
+                        confidence=0.96,
+                        line_start=idx,
+                        line_end=idx,
+                        explanation="Java database query constructed via dynamic string concatenation allows SQL injection attacks.",
+                        team_memory_used=[],
+                        recommended_fix="Use java.sql.PreparedStatement with positional parameter placeholders (?).",
+                        requires_fix=True,
+                        evidence=line_str,
+                        validated_by_scanner=True,
+                    )
+                )
+
+            if lang_lower in ("php",) and PHP_SQL_INJECTION_PATTERN.search(line_str):
+                findings.append(
+                    FindingItem(
+                        rule_id="SQL001",
+                        title="SQL Injection (Unescaped Variable Interpolation in PHP)",
+                        category="security",
+                        severity="critical",
+                        confidence=0.96,
+                        line_start=idx,
+                        line_end=idx,
+                        explanation="PHP database query with direct variable interpolation allows SQL injection.",
+                        team_memory_used=[],
+                        recommended_fix="Use PDO prepared statements: $stmt = $pdo->prepare('SELECT ... WHERE x = ?'); $stmt->execute([$val]);",
+                        requires_fix=True,
+                        evidence=line_str,
+                        validated_by_scanner=True,
+                    )
+                )
+
+            if lang_lower in ("go", "golang") and GO_SQL_INJECTION_PATTERN.search(line_str):
+                findings.append(
+                    FindingItem(
+                        rule_id="SQL001",
+                        title="SQL Injection (fmt.Sprintf in Go Database Query)",
+                        category="security",
+                        severity="critical",
+                        confidence=0.96,
+                        line_start=idx,
+                        line_end=idx,
+                        explanation="Go database query constructed with fmt.Sprintf allows SQL injection.",
+                        team_memory_used=[],
+                        recommended_fix="Use parameterized queries: db.Query('SELECT ... WHERE x = $1', val)",
+                        requires_fix=True,
+                        evidence=line_str,
+                        validated_by_scanner=True,
+                    )
+                )
+
+            # 6. PATH001: Unsafe Path Construction / Path Traversal
+            if PATH_TRAVERSAL_PATTERN.search(line_str):
+                if not any(k in full_code for k in ("os.path.basename", "secure_filename", "resolve")):
+                    findings.append(
+                        FindingItem(
+                            rule_id="PATH001",
+                            title="Path Traversal Risk (Dynamic File Path Construction)",
+                            category="security",
+                            severity="high",
+                            confidence=0.90,
+                            line_start=idx,
+                            line_end=idx,
+                            explanation="File path constructed directly from dynamic variables passed to open(). Can allow path traversal if inputs are unvalidated.",
+                            team_memory_used=[],
+                            recommended_fix="Sanitize filename with os.path.basename() or validate target path with pathlib.Path.resolve() within allowed directory.",
+                            requires_fix=True,
+                            evidence=line_str,
+                            validated_by_scanner=True,
+                        )
+                    )
+
+            # 6b. SEC_CRYPTO: Weak Cryptographic Hash / Algorithm
+            if re.search(r"""(?i)\b(hashlib\.(?:md5|sha1)|Crypto\.Cipher\.DES)\b""", line_str):
+                findings.append(
+                    FindingItem(
+                        rule_id="SEC_CRYPTO",
+                        title="Weak Cryptographic Hash / Algorithm (MD5 / SHA-1)",
+                        category="security",
+                        severity="high",
+                        confidence=0.95,
+                        line_start=idx,
+                        line_end=idx,
+                        explanation="MD5 and SHA-1 are cryptographically broken and vulnerable to collision attacks.",
+                        team_memory_used=[],
+                        recommended_fix="Use modern cryptographic algorithms such as SHA-256 (hashlib.sha256) or bcrypt / argon2 for passwords.",
                         requires_fix=True,
                         evidence=line_str,
                         validated_by_scanner=True,
@@ -923,6 +1075,12 @@ class DeterministicSecurityScanner:
                         validated_by_scanner=True,
                     )
                 )
+
+        for f in findings:
+            if not f.finding_id:
+                f.finding_id = generate_finding_id(f.rule_id, f.line_start, f.category, f.evidence)
+            if not f.status:
+                f.status = "STILL_PRESENT"
 
         return findings
 

@@ -22,6 +22,7 @@ export interface IssueItem {
 }
 
 export interface FindingItem {
+  finding_id?: string;
   rule_id: string;
   title: string;
   category: 'security' | 'quality' | 'architecture' | 'performance' | 'syntax' | 'logic' | 'bug';
@@ -36,18 +37,41 @@ export interface FindingItem {
   requires_fix: boolean;
   evidence?: string | null;
   validated_by_scanner?: boolean;
+  status?: 'RESOLVED' | 'STILL_PRESENT' | 'NEW_ISSUE' | 'PRE_EXISTING' | 'FALSE_POSITIVE' | 'UNABLE_TO_VERIFY';
+  resolution_note?: string | null;
+  portability_note?: string | null;
 }
 
 export interface AutoFixResult {
   original_code: string;
-  fixed_code: string;
+  fixed_code?: string | null;
   changes_made: string[] | string;
   remaining_risks: string[] | string;
   is_validated: boolean;
-  validation_status?: 'VERIFIED' | 'VALIDATION_LIMITED' | 'VALIDATION_FAILED';
+  validation_status?: 'VERIFIED' | 'VALIDATION_LIMITED' | 'VALIDATION_FAILED' | 'NOT_VALIDATED';
+  remediation_status?: 'verified' | 'generated' | 'validation_failed' | 'unavailable' | 'unsafe_to_autofix';
+  remediation_method?: 'llm' | 'deterministic' | 'none';
   validation_message: string;
   differs_from_original?: boolean;
   vulnerabilities_resolved?: boolean;
+  original_findings?: FindingItem[];
+  fixed_code_findings?: FindingItem[];
+  resolved_findings?: FindingItem[];
+  new_findings?: FindingItem[];
+  false_positives?: FindingItem[];
+  verification_checks?: string[];
+  portability_notes?: string[];
+}
+
+export interface CodeReviewRequest {
+  code: string;
+  language?: string;
+  filename?: string | null;
+  context_hint?: string | null;
+  parent_review_id?: string;
+  original_code?: string;
+  original_findings?: FindingItem[];
+  is_fixed_code_review?: boolean;
 }
 
 export interface CodeReviewResponse {
@@ -56,11 +80,19 @@ export interface CodeReviewResponse {
   language: string;
   filename?: string | null;
   status: 'PASS' | 'FINDINGS';
-  review_state?: 'REVIEW_SUCCESS' | 'FINDINGS_FOUND' | 'NO_FINDINGS' | 'NO_ISSUES' | 'AI_PARTIAL_FAILURE' | 'REVIEW_ERROR';
+  success?: boolean;
+  review_mode?: 'ai' | 'deterministic';
+  fallback_used?: boolean;
+  system_reason?: string | null;
+  review_state?: 'AI_REVIEW_SUCCESS' | 'DETERMINISTIC_FALLBACK' | 'REVIEW_FAILED' | 'REVIEW_SUCCESS' | 'FINDINGS_FOUND' | 'NO_FINDINGS' | 'NO_ISSUES' | 'AI_PARTIAL_FAILURE' | 'REVIEW_ERROR';
   summary: string;
   overall_severity: Severity;
   confidence: number;
   findings: FindingItem[];
+  resolved_findings?: FindingItem[];
+  new_findings?: FindingItem[];
+  false_positives?: FindingItem[];
+  is_fixed_code_review?: boolean;
   auto_fix?: AutoFixResult | null;
   code_hash?: string;
   // Legacy / fallback fields

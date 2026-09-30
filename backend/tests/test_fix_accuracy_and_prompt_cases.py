@@ -70,6 +70,7 @@ def test_section22_test1_sql_injection_verified_fix(monkeypatch):
     assert res.auto_fix.validation_status == "VERIFIED"
     assert res.auto_fix.is_validated is True
     assert res.auto_fix.vulnerabilities_resolved is True
+    assert res.auto_fix.fixed_code is not None
     assert "%s" in res.auto_fix.fixed_code or "?" in res.auto_fix.fixed_code
 
 
@@ -159,6 +160,7 @@ def test_section22_test3_hardcoded_password_undefined_database(monkeypatch):
 
     # 2. Fix generated
     assert res.auto_fix is not None
+    assert res.auto_fix.fixed_code is not None
     assert "os.getenv" in res.auto_fix.fixed_code
 
     # 3. But NOT marked VERIFIED because `database` is an unresolved external dependency!

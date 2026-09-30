@@ -1,7 +1,7 @@
 import logging
 import re
 import time
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional, Dict, Any, Literal
 import httpx
 from app.config import settings
 from app.models import MemoryItem
@@ -242,7 +242,7 @@ class HindsightService:
 
     def recall(
         self, query: str, max_tokens: int = 4096
-    ) -> Tuple[str, List[MemoryItem], str]:
+    ) -> Tuple[Literal["recalled", "none_found", "unavailable"], List[MemoryItem], str]:
         """
         Recalls relevant team memories from Hindsight.
         Queries the Hindsight bank directly, applies semantic relevance filtering,

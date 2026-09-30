@@ -71,34 +71,80 @@ def get_user_profile(db_connection, username_input):
     if (!code.trim()) return;
 
     setIsLoading(true);
+    setReview(null);
     setErrorMessage(null);
     setLoadingStep('Analyzing code...');
 
-    // Progress without fake percentages
     const t1 = setTimeout(() => {
-      setLoadingStep('Checking team memory...');
-    }, 800);
+      setLoadingStep('Running deterministic checks...');
+    }, 400);
 
     const t2 = setTimeout(() => {
-      setLoadingStep('Generating review...');
-    }, 1800);
+      setLoadingStep('Running AI analysis...');
+    }, 900);
+
+    const t3 = setTimeout(() => {
+      setLoadingStep('Generating remediation...');
+    }, 1500);
+
+    const t4 = setTimeout(() => {
+      setLoadingStep('Validating fix...');
+    }, 2200);
 
     try {
       const res = await submitReview(code, language, contextHint);
       clearTimeout(t1);
       clearTimeout(t2);
+      clearTimeout(t3);
+      clearTimeout(t4);
       setReview(res);
     } catch (err: any) {
       clearTimeout(t1);
       clearTimeout(t2);
-      let userFriendlyError = err.message || 'Code review could not be completed.';
-      if (userFriendlyError.includes('API_KEY')) {
+      clearTimeout(t3);
+      clearTimeout(t4);
+      const raw: string = err?.message || 'Code review could not be completed.';
+      let userFriendlyError = raw;
+
+      if (raw.includes('backend server running') || raw.includes('port 8000') || raw.includes('Unable to connect')) {
+        userFriendlyError = 'Unable to connect to the review service. Make sure the backend server is running on port 8000.';
+      } else if (raw.includes('temporarily unavailable') || raw.includes('service error')) {
+        userFriendlyError = 'Review service temporarily unavailable. Please try again in a moment.';
+      } else if (raw.includes('invalid response') || raw.includes('unexpected HTML')) {
+        userFriendlyError = 'Received an invalid response from the review service. The backend may be starting up — please try again.';
+      } else if (raw.includes('Rate limit') || raw.includes('429')) {
+        userFriendlyError = 'Rate limit reached. Please wait a moment and try again.';
+      } else if (raw.includes('API_KEY') || raw.includes('Authentication error')) {
         userFriendlyError = 'Review could not be completed because the required API keys are not configured in your .env file.';
-      } else if (userFriendlyError.includes('hindsight') && userFriendlyError.includes('unavailable')) {
-        userFriendlyError = 'Review could not be completed because the Hindsight team memory service is unavailable.';
-      } else if (userFriendlyError.includes('Groq') && userFriendlyError.includes('unavailable')) {
-        userFriendlyError = 'Review could not be completed because the LLM analysis service is currently unavailable.';
+      } else if (raw.includes('Groq') && raw.includes('unavailable')) {
+        userFriendlyError = 'AI review unavailable — deterministic security analysis will be used instead.';
       }
+      setErrorMessage(userFriendlyError);
+    } finally {
+      setIsLoading(false);
+      setLoadingStep('');
+    }
+  };
+
+
+  const handleReviewFixedCode = async (fixedCode: string) => {
+    if (!fixedCode.trim()) return;
+
+    setIsLoading(true);
+    setErrorMessage(null);
+    setLoadingStep('Re-reviewing fixed code against original baseline...');
+
+    try {
+      const res = await submitReview(fixedCode, language, contextHint, {
+        parentReviewId: review?.id,
+        originalCode: review?.auto_fix?.original_code || code,
+        originalFindings: review?.findings || [],
+        isFixedCodeReview: true,
+      });
+      setReview(res);
+      setCode(fixedCode);
+    } catch (err: any) {
+      const userFriendlyError = err.message || 'Fixed code re-review could not be completed.';
       setErrorMessage(userFriendlyError);
     } finally {
       setIsLoading(false);
@@ -243,6 +289,7 @@ def get_user_profile(db_connection, username_input):
                 onTeachRuleFromReview={handleTeachRuleFromReview}
                 onRunReviewAgain={() => handleReviewCode()}
                 onApplyFixedCode={(fixed) => setCode(fixed)}
+                onReviewFixedCode={handleReviewFixedCode}
               />
             </div>
           </div>
